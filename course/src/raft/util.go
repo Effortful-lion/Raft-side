@@ -11,25 +11,25 @@ import (
 type logTopic string
 
 const (
-	DError logTopic = "ERRO" // 级别 = 3
-	DWarn  logTopic = "WARN" // 级别 = 2
-	DInfo  logTopic = "INFO" // 级别 = 1
-	DDebug logTopic = "DBUG" // 级别 = 0
+	DError logTopic = "ERRO" // level = 3
+	DWarn  logTopic = "WARN" // level = 2
+	DInfo  logTopic = "INFO" // level = 1
+	DDebug logTopic = "DBUG" // level = 0
 
-	// 级别 = 1
+	// level = 1
 	DClient  logTopic = "CLNT"
-	DCommit  logTopic = "CMIT"
-	DDrop    logTopic = "DROP"
+	DCommit  logTopic = "CMIT" // 提交日志
+	DDrop    logTopic = "DROP" // 删除 Log 日志
 	DLeader  logTopic = "LEAD"
-	DLog     logTopic = "LOG1" // 发送日志
-	DLog2    logTopic = "LOG2" // 接收日志
-	DPersist logTopic = "PERS"
+	DLog     logTopic = "LOG1" // sending log
+	DLog2    logTopic = "LOG2" // receiving log
+	DPersist logTopic = "PERS" // 对 Raft 字段持久化
 	DSnap    logTopic = "SNAP"
-	DTerm    logTopic = "TERM"
+	DTerm    logTopic = "TERM" // Term 发生变更
 	DTest    logTopic = "TEST"
 	DTimer   logTopic = "TIMR"
 	DTrace   logTopic = "TRCE"
-	DVote    logTopic = "VOTE"
+	DVote    logTopic = "VOTE" // 谁投票给谁，谁拒绝谁的投票
 	DApply   logTopic = "APLY"
 )
 
@@ -68,11 +68,10 @@ func init() {
 	logLevel = getEnvLevel()
 	logStart = time.Now()
 
-	// 不打印详细日期
+	// do not print verbose date
 	log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
 }
 
-// 参数：节点id 任期 日志等级 格式化 value
 func LOG(peerId int, term int, topic logTopic, format string, a ...interface{}) {
 	topicLevel := getTopicLevel(topic)
 	if logLevel <= topicLevel {
@@ -82,4 +81,8 @@ func LOG(peerId int, term int, topic logTopic, format string, a ...interface{}) 
 		format = prefix + format
 		log.Printf(format, a...)
 	}
+}
+
+func INFO(format string, a ...interface{}) {
+	log.Printf(format, a...)
 }

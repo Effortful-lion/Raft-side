@@ -1,10 +1,11 @@
 package raft
 
 //
-// 支持 Raft 测试器。
+// support for Raft tester.
 //
-// 我们将使用原始的 config.go 来测试你的代码以进行评分。
-// 因此，虽然你可以修改此代码以帮助调试，但请在提交前使用原始代码进行测试。
+// we will use the original config.go to test your code for grading.
+// so, while you can modify this code to help you debug, please
+// test with the original before submitting.
 //
 
 import (
@@ -46,17 +47,17 @@ type config struct {
 	net         *labrpc.Network
 	n           int
 	rafts       []*Raft
-	applyErr    []string // 来自 apply channel 读取器的错误信息
-	connected   []bool   // 每个服务器是否在网络上
+	applyErr    []string // from apply channel readers
+	connected   []bool   // whether each server is on the net
 	saved       []*Persister
-	endnames    [][]string            // 每个服务器发送到的端口文件名
-	logs        []map[int]interface{} // 每个服务器已提交条目的副本
+	endnames    [][]string            // the port file names each sends to
+	logs        []map[int]interface{} // copy of each server's committed entries
 	lastApplied []int
-	start       time.Time // make_config() 被调用的时间
-	// begin()/end() 统计信息
-	t0        time.Time // test_test.go 调用 cfg.begin() 的时间
-	rpcs0     int       // 测试开始时的 rpcTotal()
-	cmds0     int       // 达成一致的数量
+	start       time.Time // time at which make_config() was called
+	// begin()/end() statistics
+	t0        time.Time // time at which test_test.go called cfg.begin()
+	rpcs0     int       // rpcTotal() at start of test
+	cmds0     int       // number of agreements
 	bytes0    int64
 	maxIndex  int
 	maxIndex0 int
@@ -107,18 +108,18 @@ func make_config(t *testing.T, n int, unreliable bool, snapshot bool) *config {
 	return cfg
 }
 
-// 关闭 Raft 服务器但保存其持久化状态。
+// shut down a Raft server but save its persistent state.
 func (cfg *config) crash1(i int) {
 	cfg.disconnect(i)
-	cfg.net.DeleteServer(i) // 禁用到服务器的客户端连接。
+	cfg.net.DeleteServer(i) // disable client connections to the server.
 
 	cfg.mu.Lock()
 	defer cfg.mu.Unlock()
 
-	// 一个新的 persister，以防旧实例
-	// 继续更新 Persister。
-	// 但复制旧 persister 的内容，以便我们始终
-	// 向 Make() 传递最后持久化的状态。
+	// a fresh persister, in case old instance
+	// continues to update the Persister.
+	// but copy old persister's content so that we always
+	// pass Make() the last persisted state.
 	if cfg.saved[i] != nil {
 		cfg.saved[i] = cfg.saved[i].Copy()
 	}
@@ -145,7 +146,7 @@ func (cfg *config) checkLogs(i int, m ApplyMsg) (string, bool) {
 	for j := 0; j < len(cfg.logs); j++ {
 		if old, oldok := cfg.logs[j][m.CommandIndex]; oldok && old != v {
 			log.Printf("%v: log %v; server %v\n", i, cfg.logs[i], cfg.logs[j])
-			// 某个服务器已经为这个条目提交了不同的值！
+			// some server has already committed a different value for this entry!
 			err_msg = fmt.Sprintf("commit index=%v server=%v %v != server=%v %v",
 				m.CommandIndex, i, m.Command, j, old)
 		}
@@ -158,11 +159,12 @@ func (cfg *config) checkLogs(i int, m ApplyMsg) (string, bool) {
 	return err_msg, prevok
 }
 
-// applier 从 apply channel 读取消息并检查它们是否与日志内容匹配
+// applier reads message from apply ch and checks that they match the log
+// contents
 func (cfg *config) applier(i int, applyCh chan ApplyMsg) {
 	for m := range applyCh {
 		if m.CommandValid == false {
-			// 忽略其他类型的 ApplyMsg
+			// ignore other types of ApplyMsg
 		} else {
 			cfg.mu.Lock()
 			err_msg, prevok := cfg.checkLogs(i, m)
@@ -173,14 +175,14 @@ func (cfg *config) applier(i int, applyCh chan ApplyMsg) {
 			if err_msg != "" {
 				log.Fatalf("apply error: %v", err_msg)
 				cfg.applyErr[i] = err_msg
-				// 错误后继续读取，以便 Raft 不会阻塞
-				// 持有锁...
+				// keep reading after error so that Raft doesn't block
+				// holding locks...
 			}
 		}
 	}
 }
 
-// 返回 "" 或错误字符串
+// returns "" or error string
 func (cfg *config) ingestSnap(i int, snapshot []byte, index int) string {
 	if snapshot == nil {
 		log.Fatalf("nil snapshot")
@@ -209,7 +211,7 @@ func (cfg *config) ingestSnap(i int, snapshot []byte, index int) string {
 
 const SnapShotInterval = 10
 
-// 定期对 Raft 状态进行快照
+// periodically snapshot raft state
 func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg) {
 	cfg.mu.Lock()
 	rf := cfg.rafts[i]
@@ -255,32 +257,33 @@ func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg) {
 				rf.Snapshot(m.CommandIndex, w.Bytes())
 			}
 		} else {
-			// 忽略其他类型的 ApplyMsg。
+			// Ignore other types of ApplyMsg.
 		}
 		if err_msg != "" {
 			log.Fatalf("apply error: %v", err_msg)
 			cfg.applyErr[i] = err_msg
-			// 错误后继续读取，以便 Raft 不会阻塞
-			// 持有锁...
+			// keep reading after error so that Raft doesn't block
+			// holding locks...
 		}
 	}
 }
 
-// 启动或重启一个 Raft。
-// 如果已经存在一个，则先 "杀死" 它。
-// 分配新的出站端口文件名和新的状态持久化器，
-// 以隔离此服务器的先前实例。因为我们无法真正杀死它。
+// start or re-start a Raft.
+// if one already exists, "kill" it first.
+// allocate new outgoing port file names, and a new
+// state persister, to isolate previous instance of
+// this server. since we cannot really kill it.
 func (cfg *config) start1(i int, applier func(int, chan ApplyMsg)) {
 	cfg.crash1(i)
 
-	// 一组新的出站 ClientEnd 名称。
-	// 以便旧的崩溃实例的 ClientEnd 无法发送消息。
+	// a fresh set of outgoing ClientEnd names.
+	// so that old crashed instance's ClientEnds can't send.
 	cfg.endnames[i] = make([]string, cfg.n)
 	for j := 0; j < cfg.n; j++ {
 		cfg.endnames[i][j] = randstring(20)
 	}
 
-	// 一组新的 ClientEnd。
+	// a fresh set of ClientEnds.
 	ends := make([]*labrpc.ClientEnd, cfg.n)
 	for j := 0; j < cfg.n; j++ {
 		ends[j] = cfg.net.MakeEnd(cfg.endnames[i][j])
@@ -291,17 +294,17 @@ func (cfg *config) start1(i int, applier func(int, chan ApplyMsg)) {
 
 	cfg.lastApplied[i] = 0
 
-	// 一个新的 persister，以便旧实例不会覆盖
-	// 新实例的持久化状态。
-	// 但复制旧 persister 的内容，以便我们始终
-	// 向 Make() 传递最后持久化的状态。
+	// a fresh persister, so old instance doesn't overwrite
+	// new instance's persisted state.
+	// but copy old persister's content so that we always
+	// pass Make() the last persisted state.
 	if cfg.saved[i] != nil {
 		cfg.saved[i] = cfg.saved[i].Copy()
 
 		snapshot := cfg.saved[i].ReadSnapshot()
 		if snapshot != nil && len(snapshot) > 0 {
-			// 模拟 KV 服务器并立即处理快照。
-			// 理想情况下，Raft 应该通过 applyCh 发送它...
+			// mimic KV server and process snapshot now.
+			// ideally Raft should send it up on applyCh...
 			err := cfg.ingestSnap(i, snapshot, -1)
 			if err != "" {
 				cfg.t.Fatal(err)
@@ -330,7 +333,7 @@ func (cfg *config) start1(i int, applier func(int, chan ApplyMsg)) {
 }
 
 func (cfg *config) checkTimeout() {
-	// 对每个测试强制执行两分钟的实时限制
+	// enforce a two minute real-time limit on each test
 	if !cfg.t.Failed() && time.Since(cfg.start) > 120*time.Second {
 		cfg.t.Fatal("test took longer than 120 seconds")
 	}
@@ -352,13 +355,13 @@ func (cfg *config) cleanup() {
 	cfg.checkTimeout()
 }
 
-// 将服务器 i 连接到网络。
+// attach server i to the net.
 func (cfg *config) connect(i int) {
 	// fmt.Printf("connect(%d)\n", i)
 
 	cfg.connected[i] = true
 
-	// 出站 ClientEnd
+	// outgoing ClientEnds
 	for j := 0; j < cfg.n; j++ {
 		if cfg.connected[j] {
 			endname := cfg.endnames[i][j]
@@ -366,7 +369,7 @@ func (cfg *config) connect(i int) {
 		}
 	}
 
-	// 入站 ClientEnd
+	// incoming ClientEnds
 	for j := 0; j < cfg.n; j++ {
 		if cfg.connected[j] {
 			endname := cfg.endnames[j][i]
@@ -375,13 +378,13 @@ func (cfg *config) connect(i int) {
 	}
 }
 
-// 将服务器 i 从网络中分离。
+// detach server i from the net.
 func (cfg *config) disconnect(i int) {
 	// fmt.Printf("disconnect(%d)\n", i)
 
 	cfg.connected[i] = false
 
-	// 出站 ClientEnd
+	// outgoing ClientEnds
 	for j := 0; j < cfg.n; j++ {
 		if cfg.endnames[i] != nil {
 			endname := cfg.endnames[i][j]
@@ -389,7 +392,7 @@ func (cfg *config) disconnect(i int) {
 		}
 	}
 
-	// 入站 ClientEnd
+	// incoming ClientEnds
 	for j := 0; j < cfg.n; j++ {
 		if cfg.endnames[j] != nil {
 			endname := cfg.endnames[j][i]
@@ -418,10 +421,11 @@ func (cfg *config) setlongreordering(longrel bool) {
 	cfg.net.LongReordering(longrel)
 }
 
-// 检查连接的服务器中是否有一个认为自己是领导者，
-// 并且没有其他连接的服务器认为自己是领导者。
+// check that one of the connected servers thinks
+// it is the leader, and that no other connected
+// server thinks otherwise.
 //
-// 尝试几次，以防需要重新选举。
+// try a few times in case re-elections are needed.
 func (cfg *config) checkOneLeader() int {
 	for iters := 0; iters < 10; iters++ {
 		ms := 450 + (rand.Int63() % 100)
@@ -454,7 +458,7 @@ func (cfg *config) checkOneLeader() int {
 	return -1
 }
 
-// 检查所有服务器是否对任期达成一致。
+// check that everyone agrees on the term.
 func (cfg *config) checkTerms() int {
 	term := -1
 	for i := 0; i < cfg.n; i++ {
@@ -470,7 +474,8 @@ func (cfg *config) checkTerms() int {
 	return term
 }
 
-// 检查没有连接的服务器认为自己是领导者。
+// check that none of the connected servers
+// thinks it is the leader.
 func (cfg *config) checkNoLeader() {
 	for i := 0; i < cfg.n; i++ {
 		if cfg.connected[i] {
@@ -482,7 +487,7 @@ func (cfg *config) checkNoLeader() {
 	}
 }
 
-// 有多少服务器认为日志条目已提交？
+// how many servers think a log entry is committed?
 func (cfg *config) nCommitted(index int) (int, interface{}) {
 	count := 0
 	var cmd interface{} = nil
@@ -507,8 +512,8 @@ func (cfg *config) nCommitted(index int) (int, interface{}) {
 	return count, cmd
 }
 
-// 等待至少 n 个服务器提交。
-// 但不要永远等待。
+// wait for at least n servers to commit.
+// but don't wait forever.
 func (cfg *config) wait(index int, n int, startTerm int) interface{} {
 	to := 10 * time.Millisecond
 	for iters := 0; iters < 30; iters++ {
@@ -523,8 +528,8 @@ func (cfg *config) wait(index int, n int, startTerm int) interface{} {
 		if startTerm > -1 {
 			for _, r := range cfg.rafts {
 				if t, _ := r.GetState(); t > startTerm {
-					// 有人已经前进了
-					// 不能再保证我们会 "赢"
+					// someone has moved on
+					// can no longer guarantee that we'll "win"
 					return -1
 				}
 			}
@@ -538,23 +543,23 @@ func (cfg *config) wait(index int, n int, startTerm int) interface{} {
 	return cmd
 }
 
-// 完成一次完整的共识。
-// 最初可能会选择错误的领导者，
-// 并在放弃后重新提交。
-// 大约 10 秒后完全放弃。
-// 间接检查服务器是否对相同的值达成一致，
-// 因为 nCommitted() 会检查这一点，
-// 从 applyCh 读取的线程也会检查。
-// 返回索引。
-// 如果 retry==true，可能会多次提交命令，
-// 以防领导者在 Start() 后立即失败。
-// 如果 retry==false，只调用 Start() 一次，
-// 以简化早期的 Lab 2B 测试。
+// do a complete agreement.
+// it might choose the wrong leader initially,
+// and have to re-submit after giving up.
+// entirely gives up after about 10 seconds.
+// indirectly checks that the servers agree on the
+// same value, since nCommitted() checks this,
+// as do the threads that read from applyCh.
+// returns index.
+// if retry==true, may submit the command multiple
+// times, in case a leader fails just after Start().
+// if retry==false, calls Start() only once, in order
+// to simplify the early Lab 2B tests.
 func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 	t0 := time.Now()
 	starts := 0
 	for time.Since(t0).Seconds() < 10 && cfg.checkFinished() == false {
-		// 尝试所有服务器，可能其中一个是领导者。
+		// try all the servers, maybe one is the leader.
 		index := -1
 		for si := 0; si < cfg.n; si++ {
 			starts = (starts + 1) % cfg.n
@@ -574,14 +579,15 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 		}
 
 		if index != -1 {
-			// 有人声称是领导者并已提交我们的命令；等待一段时间以达成共识。
+			// somebody claimed to be the leader and to have
+			// submitted our command; wait a while for agreement.
 			t1 := time.Now()
 			for time.Since(t1).Seconds() < 2 {
 				nd, cmd1 := cfg.nCommitted(index)
 				if nd > 0 && nd >= expectedServers {
-					// 已提交
+					// committed
 					if cmd1 == cmd {
-						// 并且是我们提交的命令。
+						// and it was the command we submitted.
 						return index
 					}
 				}
@@ -600,9 +606,9 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 	return -1
 }
 
-// 开始一个测试。
-// 打印测试消息。
-// 例如：cfg.begin("Test (2B): RPC counts aren't too high")
+// start a Test.
+// print the Test message.
+// e.g. cfg.begin("Test (2B): RPC counts aren't too high")
 func (cfg *config) begin(description string) {
 	fmt.Printf("%s ...\n", description)
 	cfg.t0 = time.Now()
@@ -612,18 +618,19 @@ func (cfg *config) begin(description string) {
 	cfg.maxIndex0 = cfg.maxIndex
 }
 
-// 结束一个测试 - 我们到达这里意味着没有失败。
-// 打印通过消息，
-// 和一些性能数字。
+// end a Test -- the fact that we got here means there
+// was no failure.
+// print the Passed message,
+// and some performance numbers.
 func (cfg *config) end() {
 	cfg.checkTimeout()
 	if cfg.t.Failed() == false {
 		cfg.mu.Lock()
-		t := time.Since(cfg.t0).Seconds()       // 实际时间
-		npeers := cfg.n                         // Raft 节点数量
-		nrpc := cfg.rpcTotal() - cfg.rpcs0      // RPC 发送数量
-		nbytes := cfg.bytesTotal() - cfg.bytes0 // 字节数
-		ncmds := cfg.maxIndex - cfg.maxIndex0   // 报告的 Raft 共识数量
+		t := time.Since(cfg.t0).Seconds()       // real time
+		npeers := cfg.n                         // number of Raft peers
+		nrpc := cfg.rpcTotal() - cfg.rpcs0      // number of RPC sends
+		nbytes := cfg.bytesTotal() - cfg.bytes0 // number of bytes
+		ncmds := cfg.maxIndex - cfg.maxIndex0   // number of Raft agreements reported
 		cfg.mu.Unlock()
 
 		fmt.Printf("  ... Passed --")
@@ -631,7 +638,7 @@ func (cfg *config) end() {
 	}
 }
 
-// 所有服务器的最大日志大小
+// Maximum log size across all servers
 func (cfg *config) LogSize() int {
 	logsize := 0
 	for i := 0; i < cfg.n; i++ {

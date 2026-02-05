@@ -1,10 +1,11 @@
 package raft
 
 //
-// Raft 测试。
+// Raft tests.
 //
-// 我们将使用原始的 test_test.go 来测试你的代码以进行评分。
-// 因此，虽然你可以修改此代码以帮助调试，但请在提交前使用原始代码进行测试。
+// we will use the original test_test.go to test your code for grading.
+// so, while you can modify this code to help you debug, please
+// test with the original before submitting.
 //
 
 import (
@@ -16,11 +17,10 @@ import (
 	"time"
 )
 
-// 测试器慷慨地允许解决方案在一秒内完成选举
-// （比论文中的超时范围大得多）。
+// The tester generously allows solutions to complete elections in one second
+// (much more than the paper's range of timeouts).
 const RaftElectionTimeout = 1000 * time.Millisecond
 
-// 测试最初的选举部分A
 func TestInitialElectionPartA(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false, false)
@@ -28,30 +28,30 @@ func TestInitialElectionPartA(t *testing.T) {
 
 	cfg.begin("Test (PartA): initial election")
 
-	// 是否选举出领导者？
+	// is a leader elected?
 	cfg.checkOneLeader()
 
-	// 稍微睡眠以避免与跟随者了解选举结果的竞争，然后检查所有节点是否对任期达成一致。
+	// sleep a bit to avoid racing with followers learning of the
+	// election, then check that all peers agree on the term.
 	time.Sleep(50 * time.Millisecond)
 	term1 := cfg.checkTerms()
 	if term1 < 1 {
 		t.Fatalf("term is %v, but should be at least 1", term1)
 	}
 
-	// 如果没有网络故障，领导者和任期是否保持不变？
+	// does the leader+term stay the same if there is no network failure?
 	time.Sleep(2 * RaftElectionTimeout)
 	term2 := cfg.checkTerms()
 	if term1 != term2 {
 		fmt.Printf("warning: term changed even though there were no failures")
 	}
 
-	// 应该仍然有一个领导者。
+	// there should still be a leader.
 	cfg.checkOneLeader()
 
 	cfg.end()
 }
 
-// 测试连任部分A
 func TestReElectionPartA(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false, false)
@@ -61,30 +61,31 @@ func TestReElectionPartA(t *testing.T) {
 
 	leader1 := cfg.checkOneLeader()
 
-	// 如果领导者断开连接，应该选举新的领导者。
+	// if the leader disconnects, a new one should be elected.
 	cfg.disconnect(leader1)
 	cfg.checkOneLeader()
 
-	// 如果旧领导者重新加入，不应该
-	// 干扰新领导者。并且旧领导者
-	// 应该切换为跟随者。
+	// if the old leader rejoins, that shouldn't
+	// disturb the new leader. and the old leader
+	// should switch to follower.
 	cfg.connect(leader1)
 	leader2 := cfg.checkOneLeader()
 
-	// 如果没有多数派，不应该选举新的领导者。
+	// if there's no quorum, no new leader should
+	// be elected.
 	cfg.disconnect(leader2)
 	cfg.disconnect((leader2 + 1) % servers)
 	time.Sleep(2 * RaftElectionTimeout)
 
-	// 检查唯一连接的服务器
-	// 不认为自己是领导者。
+	// check that the one connected server
+	// does not think it is the leader.
 	cfg.checkNoLeader()
 
-	// 如果出现多数派，应该选举领导者。
+	// if a quorum arises, it should elect a leader.
 	cfg.connect((leader2 + 1) % servers)
 	cfg.checkOneLeader()
 
-	// 最后一个节点的重新加入不应该阻止领导者的存在。
+	// re-join of last node shouldn't prevent leader from existing.
 	cfg.connect(leader2)
 	cfg.checkOneLeader()
 
@@ -102,7 +103,7 @@ func TestManyElectionsPartA(t *testing.T) {
 
 	iters := 10
 	for ii := 1; ii < iters; ii++ {
-		// 断开三个节点的连接
+		// disconnect three nodes
 		i1 := rand.Int() % servers
 		i2 := rand.Int() % servers
 		i3 := rand.Int() % servers
@@ -110,8 +111,8 @@ func TestManyElectionsPartA(t *testing.T) {
 		cfg.disconnect(i2)
 		cfg.disconnect(i3)
 
-		// 要么当前领导者仍然存活，
-		// 要么剩余的四个节点应该选举新的领导者。
+		// either the current leader should still be alive,
+		// or the remaining four should elect a new one.
 		cfg.checkOneLeader()
 
 		cfg.connect(i1)
@@ -147,7 +148,8 @@ func TestBasicAgreePartB(t *testing.T) {
 	cfg.end()
 }
 
-// 基于 RPC 字节计数检查，确保每个命令只发送给每个节点一次。
+// check, based on counting bytes of RPCs, that
+// each command is sent to each peer just once.
 func TestRPCBytesPartB(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false, false)
@@ -179,7 +181,7 @@ func TestRPCBytesPartB(t *testing.T) {
 	cfg.end()
 }
 
-// 仅测试跟随者失败的情况。
+// test just failure of followers.
 func TestFollowerFailurePartB(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false, false)
@@ -189,21 +191,22 @@ func TestFollowerFailurePartB(t *testing.T) {
 
 	cfg.one(101, servers, false)
 
-	// 断开一个跟随者与网络的连接。
+	// disconnect one follower from the network.
 	leader1 := cfg.checkOneLeader()
 	cfg.disconnect((leader1 + 1) % servers)
 
-	// 即使有断开连接的跟随者，领导者和剩余的跟随者也应该能够达成一致。
+	// the leader and remaining follower should be
+	// able to agree despite the disconnected follower.
 	cfg.one(102, servers-1, false)
 	time.Sleep(RaftElectionTimeout)
 	cfg.one(103, servers-1, false)
 
-	// 断开剩余的跟随者
+	// disconnect the remaining follower
 	leader2 := cfg.checkOneLeader()
 	cfg.disconnect((leader2 + 1) % servers)
 	cfg.disconnect((leader2 + 2) % servers)
 
-	// 提交一个命令。
+	// submit a command.
 	index, _, ok := cfg.rafts[leader2].Start(104)
 	if ok != true {
 		t.Fatalf("leader rejected Start()")
@@ -214,7 +217,7 @@ func TestFollowerFailurePartB(t *testing.T) {
 
 	time.Sleep(2 * RaftElectionTimeout)
 
-	// 检查命令 104 是否没有被提交。
+	// check that command 104 did not commit.
 	n, _ := cfg.nCommitted(index)
 	if n > 0 {
 		t.Fatalf("%v committed but no majority", n)
@@ -223,7 +226,7 @@ func TestFollowerFailurePartB(t *testing.T) {
 	cfg.end()
 }
 
-// 仅测试领导者失败的情况。
+// test just failure of leaders.
 func TestLeaderFailurePartB(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false, false)
@@ -233,28 +236,28 @@ func TestLeaderFailurePartB(t *testing.T) {
 
 	cfg.one(101, servers, false)
 
-	// 断开第一个领导者。
+	// disconnect the first leader.
 	leader1 := cfg.checkOneLeader()
 	cfg.disconnect(leader1)
 
-	// 剩余的跟随者应该选举
-	// 新的领导者。
+	// the remaining followers should elect
+	// a new leader.
 	cfg.one(102, servers-1, false)
 	time.Sleep(RaftElectionTimeout)
 	cfg.one(103, servers-1, false)
 
-	// 断开新的领导者。
+	// disconnect the new leader.
 	leader2 := cfg.checkOneLeader()
 	cfg.disconnect(leader2)
 
-	// 向每个服务器提交一个命令。
+	// submit a command to each server.
 	for i := 0; i < servers; i++ {
 		cfg.rafts[i].Start(104)
 	}
 
 	time.Sleep(2 * RaftElectionTimeout)
 
-	// 检查命令 104 是否没有被提交。
+	// check that command 104 did not commit.
 	n, _ := cfg.nCommitted(4)
 	if n > 0 {
 		t.Fatalf("%v committed but no majority", n)
@@ -263,7 +266,8 @@ func TestLeaderFailurePartB(t *testing.T) {
 	cfg.end()
 }
 
-// 测试跟随者在断开连接后重新连接时是否能够参与共识。
+// test that a follower participates after
+// disconnect and re-connect.
 func TestFailAgreePartB(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false, false)
@@ -273,22 +277,24 @@ func TestFailAgreePartB(t *testing.T) {
 
 	cfg.one(101, servers, false)
 
-	// 断开一个跟随者与网络的连接。
+	// disconnect one follower from the network.
 	leader := cfg.checkOneLeader()
 	cfg.disconnect((leader + 1) % servers)
 
-	// 即使有断开连接的跟随者，领导者和剩余的跟随者也应该能够达成一致。
+	// the leader and remaining follower should be
+	// able to agree despite the disconnected follower.
 	cfg.one(102, servers-1, false)
 	cfg.one(103, servers-1, false)
 	time.Sleep(RaftElectionTimeout)
 	cfg.one(104, servers-1, false)
 	cfg.one(105, servers-1, false)
 
-	// 重新连接
+	// re-connect
 	cfg.connect((leader + 1) % servers)
 
-	// 完整的服务器集合应该保留
-	// 之前的共识，并且能够就新命令达成一致。
+	// the full set of servers should preserve
+	// previous agreements, and be able to agree
+	// on new commands.
 	cfg.one(106, servers, true)
 	time.Sleep(RaftElectionTimeout)
 	cfg.one(107, servers, true)
@@ -305,7 +311,7 @@ func TestFailNoAgreePartB(t *testing.T) {
 
 	cfg.one(10, servers, false)
 
-	// 5个跟随者中的3个断开连接
+	// 3 of 5 followers disconnect
 	leader := cfg.checkOneLeader()
 	cfg.disconnect((leader + 1) % servers)
 	cfg.disconnect((leader + 2) % servers)
@@ -326,13 +332,13 @@ func TestFailNoAgreePartB(t *testing.T) {
 		t.Fatalf("%v committed but no majority", n)
 	}
 
-	// 修复
+	// repair
 	cfg.connect((leader + 1) % servers)
 	cfg.connect((leader + 2) % servers)
 	cfg.connect((leader + 3) % servers)
 
-	// 断开连接的多数派可能已经从
-	// 他们自己的队伍中选择了一个领导者，忘记了索引 2。
+	// the disconnected majority may have chosen a leader from
+	// among their own ranks, forgetting index 2.
 	leader2 := cfg.checkOneLeader()
 	index2, _, ok2 := cfg.rafts[leader2].Start(30)
 	if ok2 == false {
@@ -347,7 +353,6 @@ func TestFailNoAgreePartB(t *testing.T) {
 	cfg.end()
 }
 
-// 测试并发的 Start() 调用
 func TestConcurrentStartsPartB(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false, false)
@@ -359,14 +364,14 @@ func TestConcurrentStartsPartB(t *testing.T) {
 loop:
 	for try := 0; try < 5; try++ {
 		if try > 0 {
-			// 给解决方案一些时间来稳定
+			// give solution some time to settle
 			time.Sleep(3 * time.Second)
 		}
 
 		leader := cfg.checkOneLeader()
 		_, term, ok := cfg.rafts[leader].Start(1)
 		if !ok {
-			// 领导者切换得非常快
+			// leader moved on really quickly
 			continue
 		}
 
@@ -393,7 +398,7 @@ loop:
 
 		for j := 0; j < servers; j++ {
 			if t, _ := cfg.rafts[j].GetState(); t != term {
-				// 任期已更改 - 无法期望低 RPC 计数
+				// term changed -- can't expect low RPC counts
 				continue loop
 			}
 		}
@@ -404,9 +409,9 @@ loop:
 			cmd := cfg.wait(index, servers, term)
 			if ix, ok := cmd.(int); ok {
 				if ix == -1 {
-					// 节点已进入后续任期
-					// 因此我们不能期望所有 Start() 调用都
-					// 成功
+					// peers have moved on to later terms
+					// so we can't expect all Start()s to
+					// have succeeded
 					failed = true
 					break
 				}
@@ -417,7 +422,7 @@ loop:
 		}
 
 		if failed {
-			// 避免 goroutine 泄漏
+			// avoid leaking goroutines
 			go func() {
 				for range is {
 				}
@@ -458,28 +463,28 @@ func TestRejoinPartB(t *testing.T) {
 
 	cfg.one(101, servers, true)
 
-	// 领导者网络故障
+	// leader network failure
 	leader1 := cfg.checkOneLeader()
 	cfg.disconnect(leader1)
 
-	// 让旧领导者尝试就一些条目达成一致
+	// make old leader try to agree on some entries
 	cfg.rafts[leader1].Start(102)
 	cfg.rafts[leader1].Start(103)
 	cfg.rafts[leader1].Start(104)
 
-	// 新领导者提交，也包括索引=2
+	// new leader commits, also for index=2
 	cfg.one(103, 2, true)
 
-	// 新领导者网络故障
+	// new leader network failure
 	leader2 := cfg.checkOneLeader()
 	cfg.disconnect(leader2)
 
-	// 旧领导者重新连接
+	// old leader connected again
 	cfg.connect(leader1)
 
 	cfg.one(104, 2, true)
 
-	// 现在所有节点都在一起
+	// all together now
 	cfg.connect(leader2)
 
 	cfg.one(105, servers, true)
@@ -496,13 +501,13 @@ func TestBackupPartB(t *testing.T) {
 
 	cfg.one(rand.Int(), servers, true)
 
-	// 将领导者和一个跟随者放在一个分区中
+	// put leader and one follower in a partition
 	leader1 := cfg.checkOneLeader()
 	cfg.disconnect((leader1 + 2) % servers)
 	cfg.disconnect((leader1 + 3) % servers)
 	cfg.disconnect((leader1 + 4) % servers)
 
-	// 提交许多不会提交的命令
+	// submit lots of commands that won't commit
 	for i := 0; i < 50; i++ {
 		cfg.rafts[leader1].Start(rand.Int())
 	}
@@ -512,17 +517,17 @@ func TestBackupPartB(t *testing.T) {
 	cfg.disconnect((leader1 + 0) % servers)
 	cfg.disconnect((leader1 + 1) % servers)
 
-	// 允许其他分区恢复
+	// allow other partition to recover
 	cfg.connect((leader1 + 2) % servers)
 	cfg.connect((leader1 + 3) % servers)
 	cfg.connect((leader1 + 4) % servers)
 
-	// 向新组提交许多成功的命令。
+	// lots of successful commands to new group.
 	for i := 0; i < 50; i++ {
 		cfg.one(rand.Int(), 3, true)
 	}
 
-	// 现在另一个分区的领导者和一个跟随者
+	// now another partitioned leader and one follower
 	leader2 := cfg.checkOneLeader()
 	other := (leader1 + 2) % servers
 	if leader2 == other {
@@ -530,14 +535,14 @@ func TestBackupPartB(t *testing.T) {
 	}
 	cfg.disconnect(other)
 
-	// 更多不会提交的命令
+	// lots more commands that won't commit
 	for i := 0; i < 50; i++ {
 		cfg.rafts[leader2].Start(rand.Int())
 	}
 
 	time.Sleep(RaftElectionTimeout / 2)
 
-	// 使原始领导者恢复活力，
+	// bring original leader back to life,
 	for i := 0; i < servers; i++ {
 		cfg.disconnect(i)
 	}
@@ -545,12 +550,12 @@ func TestBackupPartB(t *testing.T) {
 	cfg.connect((leader1 + 1) % servers)
 	cfg.connect(other)
 
-	// 向新组提交许多成功的命令。
+	// lots of successful commands to new group.
 	for i := 0; i < 50; i++ {
 		cfg.one(rand.Int(), 3, true)
 	}
 
-	// 现在所有人都在一起
+	// now everyone
 	for i := 0; i < servers; i++ {
 		cfg.connect(i)
 	}
@@ -586,7 +591,7 @@ func TestCountPartB(t *testing.T) {
 loop:
 	for try := 0; try < 5; try++ {
 		if try > 0 {
-			// 给解决方案一些时间来稳定
+			// give solution some time to settle
 			time.Sleep(3 * time.Second)
 		}
 
@@ -596,7 +601,7 @@ loop:
 		iters := 10
 		starti, term, ok := cfg.rafts[leader].Start(1)
 		if !ok {
-			// 领导者切换得非常快
+			// leader moved on really quickly
 			continue
 		}
 		cmds := []int{}
@@ -605,11 +610,11 @@ loop:
 			cmds = append(cmds, x)
 			index1, term1, ok := cfg.rafts[leader].Start(x)
 			if term1 != term {
-				// 启动时任期已更改
+				// Term changed while starting
 				continue loop
 			}
 			if !ok {
-				// 不再是领导者，因此任期已更改
+				// No longer the leader, so term has changed
 				continue loop
 			}
 			if starti+i != index1 {
@@ -621,7 +626,7 @@ loop:
 			cmd := cfg.wait(starti+i, servers, term)
 			if ix, ok := cmd.(int); ok == false || ix != cmds[i-1] {
 				if ix == -1 {
-					// 任期已更改 - 重试
+					// term changed -- try again
 					continue loop
 				}
 				t.Fatalf("wrong value %v committed for index %v; expected %v\n", cmd, starti+i, cmds)
@@ -632,8 +637,8 @@ loop:
 		total2 = 0
 		for j := 0; j < servers; j++ {
 			if t, _ := cfg.rafts[j].GetState(); t != term {
-				// 任期已更改 - 无法期望低 RPC 计数
-				// 需要继续更新 total2
+				// term changed -- can't expect low RPC counts
+				// need to keep going to update total2
 				failed = true
 			}
 			total2 += cfg.rpcCount(j)
@@ -678,7 +683,7 @@ func TestPersist1PartC(t *testing.T) {
 
 	cfg.one(11, servers, true)
 
-	// 崩溃并重启所有服务器
+	// crash and re-start all
 	for i := 0; i < servers; i++ {
 		cfg.start1(i, cfg.applier)
 	}
@@ -702,7 +707,7 @@ func TestPersist1PartC(t *testing.T) {
 	cfg.start1(leader2, cfg.applier)
 	cfg.connect(leader2)
 
-	cfg.wait(4, servers, -1) // 等待 leader2 加入，然后再杀死 i3
+	cfg.wait(4, servers, -1) // wait for leader2 to join before killing i3
 
 	i3 := (cfg.checkOneLeader() + 1) % servers
 	cfg.disconnect(i3)
@@ -791,11 +796,14 @@ func TestPersist3PartC(t *testing.T) {
 	cfg.end()
 }
 
-// 测试扩展 Raft 论文图 8 中描述的场景。每次迭代都会要求领导者（如果有）在 Raft 日志中插入一个命令。
-// 如果有领导者，该领导者会以高概率快速失败（可能未提交命令），或
-// 以低概率过一段时间后崩溃（很可能已提交命令）。
-// 如果存活的服务器数量不足以形成多数派，可能会启动一个新服务器。
-// 新任期的领导者可能会尝试完成复制尚未提交的日志条目。
+// Test the scenarios described in Figure 8 of the extended Raft paper. Each
+// iteration asks a leader, if there is one, to insert a command in the Raft
+// log.  If there is a leader, that leader will fail quickly with a high
+// probability (perhaps without committing the command), or crash after a while
+// with low probability (most likey committing the command).  If the number of
+// alive servers isn't enough to form a majority, perhaps start a new server.
+// The leader in a new term may try to finish replicating log entries that
+// haven't been committed yet.
 func TestFigure8PartC(t *testing.T) {
 	servers := 5
 	cfg := make_config(t, servers, false, false)
@@ -950,7 +958,7 @@ func internalChurn(t *testing.T, unreliable bool) {
 
 	stop := int32(0)
 
-	// 创建并发客户端
+	// create concurrent clients
 	cfn := func(me int, ch chan []int) {
 		var ret []int
 		ret = nil
@@ -961,7 +969,7 @@ func internalChurn(t *testing.T, unreliable bool) {
 			index := -1
 			ok := false
 			for i := 0; i < servers; i++ {
-				// 尝试所有服务器，可能其中一个是领导者
+				// try them all, maybe one of them is a leader
 				cfg.mu.Lock()
 				rf := cfg.rafts[i]
 				cfg.mu.Unlock()
@@ -974,8 +982,8 @@ func internalChurn(t *testing.T, unreliable bool) {
 				}
 			}
 			if ok {
-				// 领导者可能会提交我们的值，也可能不会。
-				// 但不要永远等待。
+				// maybe leader will commit our value, maybe not.
+				// but don't wait forever.
 				for _, to := range []int{10, 20, 50, 100, 200} {
 					nd, cmd := cfg.nCommitted(index)
 					if nd > 0 {
@@ -1025,9 +1033,10 @@ func internalChurn(t *testing.T, unreliable bool) {
 			}
 		}
 
-		// 使崩溃/重启的频率足够低，以便节点通常能够
-		// 跟上，但又不至于低到一切都已经从一个变化
-		// 稳定下来。选择一个比选举超时小的值，但不要小太多。
+		// Make crash/restart infrequent enough that the peers can often
+		// keep up, but not so infrequent that everything has settled
+		// down from one change to the next. Pick a value smaller than
+		// the election timeout, but not hugely smaller.
 		time.Sleep((RaftElectionTimeout * 7) / 10)
 	}
 
@@ -1118,16 +1127,17 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			cfg.one(rand.Int(), servers-1, true)
 		}
 
-		// 可能发送足够的命令以获取快照
+		// perhaps send enough to get a snapshot
 		nn := (SnapShotInterval / 2) + (rand.Int() % SnapShotInterval)
 		for i := 0; i < nn; i++ {
 			cfg.rafts[sender].Start(rand.Int())
 		}
 
-		// 让 applier 线程赶上 Start() 调用
+		// let applier threads catch up with the Start()'s
 		if disconnect == false && crash == false {
-			// 确保所有跟随者都已赶上，以便
-			// TestSnapshotBasicPartD() 不需要 InstallSnapshot RPC。
+			// make sure all followers have caught up, so that
+			// an InstallSnapshot RPC isn't required for
+			// TestSnapshotBasicPartD().
 			cfg.one(rand.Int(), servers, true)
 		} else {
 			cfg.one(rand.Int(), servers-1, true)
@@ -1137,8 +1147,8 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			cfg.t.Fatalf("Log size too large")
 		}
 		if disconnect {
-			// 重新连接一个跟随者，该跟随者可能落后并
-			// 需要接收快照来赶上。
+			// reconnect a follower, who maybe behind and
+			// needs to rceive a snapshot to catch up.
 			cfg.connect(victim)
 			cfg.one(rand.Int(), servers, true)
 			leader1 = cfg.checkOneLeader()
@@ -1174,7 +1184,9 @@ func TestSnapshotInstallUnCrashPartD(t *testing.T) {
 	snapcommon(t, "Test (PartD): install snapshots (unreliable+crash)", false, false, true)
 }
 
-// 服务器是否持久化快照，并在重启时使用快照和日志尾部？
+// do the servers persist the snapshots, and
+// restart using snapshot along with the
+// tail of the log?
 func TestSnapshotAllCrashPartD(t *testing.T) {
 	servers := 3
 	iters := 5
@@ -1186,7 +1198,7 @@ func TestSnapshotAllCrashPartD(t *testing.T) {
 	cfg.one(rand.Int(), servers, true)
 
 	for i := 0; i < iters; i++ {
-		// 可能足够获取快照
+		// perhaps enough to get a snapshot
 		nn := (SnapShotInterval / 2) + (rand.Int() % SnapShotInterval)
 		for i := 0; i < nn; i++ {
 			cfg.one(rand.Int(), servers, true)
@@ -1194,12 +1206,12 @@ func TestSnapshotAllCrashPartD(t *testing.T) {
 
 		index1 := cfg.one(rand.Int(), servers, true)
 
-		// 崩溃所有服务器
+		// crash all
 		for i := 0; i < servers; i++ {
 			cfg.crash1(i)
 		}
 
-		// 恢复所有服务器
+		// revive all
 		for i := 0; i < servers; i++ {
 			cfg.start1(i, cfg.applierSnap)
 			cfg.connect(i)
@@ -1213,7 +1225,8 @@ func TestSnapshotAllCrashPartD(t *testing.T) {
 	cfg.end()
 }
 
-// 服务器是否正确初始化其内存中的快照副本，确保未来对持久化状态的写入不会丢失状态？
+// do servers correctly initialize their in-memory copy of the snapshot, making
+// sure that future writes to persistent state don't lose state?
 func TestSnapshotInitPartD(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false, true)
@@ -1222,38 +1235,38 @@ func TestSnapshotInitPartD(t *testing.T) {
 	cfg.begin("Test (PartD): snapshot initialization after crash")
 	cfg.one(rand.Int(), servers, true)
 
-	// 足够的操作以生成快照
+	// enough ops to make a snapshot
 	nn := SnapShotInterval + 1
 	for i := 0; i < nn; i++ {
 		cfg.one(rand.Int(), servers, true)
 	}
 
-	// 崩溃所有服务器
+	// crash all
 	for i := 0; i < servers; i++ {
 		cfg.crash1(i)
 	}
 
-	// 恢复所有服务器
+	// revive all
 	for i := 0; i < servers; i++ {
 		cfg.start1(i, cfg.applierSnap)
 		cfg.connect(i)
 	}
 
-	// 单个操作，以便将某些内容写回持久化存储。
+	// a single op, to get something to be written back to persistent storage.
 	cfg.one(rand.Int(), servers, true)
 
-	// 崩溃所有服务器
+	// crash all
 	for i := 0; i < servers; i++ {
 		cfg.crash1(i)
 	}
 
-	// 恢复所有服务器
+	// revive all
 	for i := 0; i < servers; i++ {
 		cfg.start1(i, cfg.applierSnap)
 		cfg.connect(i)
 	}
 
-	// 执行另一个操作以触发潜在的错误
+	// do another op to trigger potential bug
 	cfg.one(rand.Int(), servers, true)
 	cfg.end()
 }
