@@ -114,9 +114,7 @@ KV Server调用时机：
 
 ### 4.1 **提供kv服务的框架**
 
-
-
-![image-20260221184436239](https://gitee.com/young-lion/picture-bed/raw/master/202602211844311.png)
+![image-20260221203057512](https://gitee.com/young-lion/picture-bed/raw/master/202602212031639.png)
 
 主要分为**两层服务**，和**持久化存储**。
 
