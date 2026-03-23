@@ -2,12 +2,6 @@ package raft
 
 import (
 	"fmt"
-	"github.com/effortful-lion/Raft-side/global"
-	"github.com/spf13/viper"
-	"go.uber.org/zap"
-	"net"
-	"net/rpc"
-	"time"
 )
 
 type RequestVoteRequest struct {
@@ -74,29 +68,29 @@ func (response InstallSnapshotResponse) String() string {
 	return fmt.Sprintf("{Term:%v}", response.Term)
 }
 
-func rpcInit(raft *Raft) {
+// raft 包中的 rpcInit 函数虽然没有被直接引用，但它提供了一个 RPC 服务初始化的模板，被其他包参考和使用。
+// 这种设计允许上层应用根据自己的需求来配置和启动 RPC 服务，而不是由 raft 包强制指定。
+// func rpcInit(raft *Raft) {
+// 	var err error
+// 	rpc.Register(raft)
 
-	var err error
+// 	for true {
+// 		raft.Lis, err = net.Listen("tcp", viper.GetStringSlice("shardkv_raft")[global.Me])
+// 		if err != nil {
+// 			zap.S().Error("Raft rcpInit failed")
+// 			time.Sleep(time.Second * 3)
+// 		} else {
+// 			break
+// 		}
+// 	}
 
-	rpc.Register(raft)
-
-	for true {
-		raft.Lis, err = net.Listen("tcp", viper.GetStringSlice("shardkv_raft")[global.Me])
-		if err != nil {
-			zap.S().Error("Raft rcpInit failed")
-			time.Sleep(time.Second * 3)
-		} else {
-			break
-		}
-	}
-
-	for true {
-		for {
-			conn, err := raft.Lis.Accept()
-			if err != nil {
-				continue
-			}
-			go rpc.ServeConn(conn)
-		}
-	}
-}
+// 	for true {
+// 		for {
+// 			conn, err := raft.Lis.Accept()
+// 			if err != nil {
+// 				continue
+// 			}
+// 			go rpc.ServeConn(conn)
+// 		}
+// 	}
+// }
